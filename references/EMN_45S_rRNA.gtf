@@ -1,0 +1,7 @@
+5.8s	source	exon	1	157	.	+	.	gene_id "5.8s"; transcript_id "5.8s"; gene_name "5.8s";
+28s	source	exon	1	5070	.	+	.	gene_id "28s"; transcript_id "28s"; gene_name "28s";
+5s	source	exon	1	121	.	+	.	gene_id "5s"; transcript_id "5s"; gene_name "5s";
+18s	source	exon	1	1869	.	+	.	gene_id "18s"; transcript_id "18s"; gene_name "18s";
+mt-12s	source	exon	1	954	.	+	.	gene_id "mt-12s"; transcript_id "mt-12s"; gene_name "mt-12s";
+mt-16s	source	exon	1	1559	.	+	.	gene_id "mt-16s"; transcript_id "mt-16s"; gene_name "mt-16s";
+45s	source	exon	1	13357	.	+	.	gene_id "45s"; transcript_id "45s"; gene_name "45s";
