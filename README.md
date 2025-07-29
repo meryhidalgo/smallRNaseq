@@ -9,14 +9,23 @@ El pipeline está diseñado para ejecutarse parcialmente en clústeres HPC (High
 ## 📁 Estructura del repositorio
 .
 ├── design.tab # Tabla de diseño experimental
+
 ├── references/ # Archivos de referencia (rRNA, índices, etc.)
+
 ├── reports/ # Informes de calidad (MultiQC)
+
 ├── src/ # Scripts del pipeline organizados por pasos
+
 │ ├── 1-QC/ # Control de calidad inicial (FastQC)
+
 │ ├── 2-trimming/ # Recorte de adaptadores (Trim Galore, Trimmomatic, Fastp)
+
 │ ├── 3-alignment/ # Alineamiento (STAR)
+
 │ ├── 4-quantification/ # Cuantificación (Salmon)
+
 │ ├── 5-DGE/ # Análisis de expresión diferencial, PCA
+
 │ └── 6-survival/ # Análisis de supervivencia
 
 
