@@ -87,7 +87,7 @@ Este pipeline utiliza scripts en **Bash**, **R** y **Python**. Algunas herramien
 
 ## 🧑‍💻 Autora
 
-**Mery Hidalgo**  
+**Maria Carazo Hidalgo**  
 Bioinformática 
 Correo: MARIA.CARAZOHIDALGO@bio-gipuzkoa.eus
 
