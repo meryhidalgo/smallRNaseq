@@ -1,0 +1,281 @@
+---
+title: "Gene_biotypes"
+author: "María Carazo"
+date: "2025-06-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(biomaRt)
+library(textshape)
+```
+
+```{r}
+tpms_path <- "../tables/refseq/sRNA_refseq_GB_Control_COUNTS_AGGREGATED-lengthScaledTPM.tab"
+
+counts <- read_delim(
+  tpms_path, 
+  delim = "\t", 
+  escape_double = FALSE,
+  trim_ws = TRUE
+) %>% drop_na(GENEID)
+
+colnames(counts)
+```
+
+```{r}
+#counts_filtered <- counts %>%
+#  rowwise() %>%
+#  mutate(total_counts = sum(c_across(7:ncol(counts)))) %>%  # Asumiendo que las columnas 7+ son de counts
+#  filter(total_counts > 5)
+```
+
+
+
+quiero probar en vez de biomart, directamente del gtf
+```{r}
+gtf <- "../../references/GRCh38_RefSeq_genic.gtf"
+human_gtf <- rtracklayer::import(gtf)
+biotypes_gtf <- human_gtf %>% as.data.frame(.) %>%
+  dplyr::select(c(gene_id, gene_biotype)) %>%
+  dplyr::rename(
+    GENEID = gene_id)
+
+rm(human_gtf)
+```
+
+```{r}
+#counts_annot <- counts %>%
+#  left_join(biotypes, by = c("GENEID" = "hgnc_symbol")) %>% filter(!is.na(gene_biotype))
+
+counts_annot <- counts %>%
+  left_join(biotypes_gtf, by = "GENEID")
+#counts_annot %>% dplyr::select(GENEID, gene_biotype) %>% filter(gene_biotype=="NA")
+```
+
+```{r}
+#write_delim(counts_annot %>% filter(gene_biotype == "rRNA"), "results_refseq/rRNA_counts_refseq.tsv", delim = "\t")
+```
+
+```{r}
+expr_cols <- colnames(counts_annot)[!(colnames(counts_annot) %in% c("GENEID", "gene_biotype"))]
+
+long_counts <- counts_annot %>%
+  pivot_longer(cols = all_of(expr_cols), names_to = "sample", values_to = "count")
+
+# Agrupar muestras por nombre
+long_counts <- long_counts %>%
+  mutate(group = ifelse(grepl("^GB", sample), "GB", "Control"))
+
+summary_grouped <- long_counts %>%
+  group_by(GENEID, gene_biotype, group)  %>%
+  summarise(median_count = median(count, na.rm = TRUE), .groups = "drop") #%>% filter(gene_biotype == "rRNA")
+
+summary_grouped <- summary_grouped %>%
+  group_by(gene_biotype, group) %>%
+  summarise(total_count = sum(median_count, na.rm = TRUE), .groups = "drop") #%>% filter(gene_biotype != "rRNA")
+
+q3_per_group <- summary_grouped %>%
+  group_by(group) %>%
+  summarise(Q3 = quantile(total_count, 0.75), .groups = "drop")
+
+top_quartile_biotypes <- summary_grouped %>%
+  left_join(q3_per_group, by = "group") %>%
+  filter(total_count >= Q3)
+```
+
+```{r}
+ggplot(top_quartile_biotypes, aes(x = gene_biotype, y = total_count, fill = group)) +
+  geom_col(position = "dodge") +
+  labs(title = "Top gene biotypes",
+       x = "Gene biotype",
+       y = "Fraction counts") +
+  theme_minimal() +
+  scale_fill_manual(values = c("GB" = "mediumpurple", "Control" = "orange")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size=12))
+```
+
+```{r}
+ggplot(top_quartile_biotypes %>% filter(gene_biotype != "rRNA"), aes(x = gene_biotype, y = total_count, fill = group)) +
+  geom_col(position = "dodge") +
+  labs(title = "Top gene biotypes",
+       x = "Gene biotype",
+       y = "Fraction counts") +
+  theme_minimal() +
+  scale_fill_manual(values = c("GB" = "mediumpurple", "Control" = "orange")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size =12))
+```
+
+
+
+```{r}
+ggplot(summary_grouped %>% filter(gene_biotype != "rRNA"), aes(x = gene_biotype, y = total_count, fill = group)) +
+  geom_col(position = "dodge") +
+  labs(title = "Top gene biotypes",
+       x = "Gene biotype",
+       y = "Sum counts") +
+  theme_minimal() +
+  scale_fill_manual(values = c("GB" = "mediumpurple", "Control" = "orange")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r}
+# Contar genes únicos por biotipo y grupo
+genes_per_biotype <- biotypes_gtf %>% distinct(GENEID, .keep_all = TRUE) %>% 
+  count(gene_biotype, name = "n_genes")
+
+# Graficar
+ggplot(genes_per_biotype, aes(x = reorder(gene_biotype, -n_genes), y = n_genes, fill = "red")) +
+  geom_col(position = "dodge") +
+  labs(title = "Number of genes per biotype (with RefSeq gtf)",
+       x = "gene biotype",
+       y = "Number of genes") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+gtf <- "/Users/mariacarazo/Documents/BiogipuzkoaLocal/references/index/gencode.v48.primary_assembly.annotation.gtf"
+human_gtf <- rtracklayer::import(gtf)
+biotypes_gtf_gencode <- human_gtf %>% as.data.frame(.) %>%
+  dplyr::select(c(gene_id, gene_type)) %>%
+  dplyr::rename(
+    GENEID = gene_id)
+
+rm(human_gtf)
+```
+
+
+```{r}
+# Contar genes únicos por biotipo y grupo
+genes_per_biotype_gc <- biotypes_gtf_gencode %>% distinct(GENEID, .keep_all = TRUE) %>% # es lo mismo que importar el gencode genic
+  count(gene_type, name = "n_genes")
+
+# Graficar
+ggplot(genes_per_biotype_gc %>% filter(gene_type != "protein_coding"), aes(x = reorder(gene_type, -n_genes), y = n_genes, fill = "red")) +
+  geom_col(position = "dodge") +
+  labs(title = "Number of genes per biotype (with GENCODE gtf)",
+       x = "gene biotype",
+       y = "Number of genes") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+gtf <- "/Users/mariacarazo/Documents/BiogipuzkoaLocal/references/ensembl/Homo_sapiens.GRCh38.114.chr.gtf"
+human_gtf <- rtracklayer::import(gtf)
+biotypes_gtf_gencode <- human_gtf %>% as.data.frame(.) %>%
+  dplyr::select(c(gene_id, gene_biotype)) %>%
+  dplyr::rename(
+    GENEID = gene_id)
+
+rm(human_gtf)
+```
+
+
+```{r}
+# Contar genes únicos por biotipo y grupo
+genes_per_biotype_gc <- biotypes_gtf_gencode %>% distinct(GENEID, .keep_all = TRUE) %>% # es lo mismo que importar el gencode genic
+  count(gene_biotype, name = "n_genes")
+
+# Graficar
+ggplot(genes_per_biotype_gc, aes(x = reorder(gene_biotype, -n_genes), y = n_genes, fill = "red")) +
+  geom_col(position = "dodge") +
+  labs(title = "Number of genes per biotype (with ENSEMBL gtf)",
+       x = "gene biotype",
+       y = "Number of genes") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+################################################
+hasta aqui por ahora
+################################################
+
+#DIFFERENTIALLY EXPRESSED
+
+```{r}
+diff_path <- "results_keep_baseMean/GDE_DIFF_RESULTS-lengthScaledTPM_logFC_1_GB_vs_Control_NREADS-10_FC-1.tsv"
+
+deg <- read_delim(
+  diff_path, 
+  delim = "\t", 
+  escape_double = FALSE,
+  trim_ws = TRUE,
+  locale = locale(decimal_mark = ".")
+) #%>% dplyr::select(GENEID)
+
+```
+
+Extraer `gene_biotype` desde biomart
+```{r}
+ensembl <- useEnsembl(biomart = "genes", dataset = "hsapiens_gene_ensembl")  # humano; cambia a mouse si necesitas
+
+biotypes <- getBM(
+  attributes = c("ensembl_gene_id", "gene_biotype"),
+  filters = "ensembl_gene_id",
+  values = deg$GENEID,
+  mart = ensembl
+)
+```
+
+```{r}
+deg_annot <- deg %>%
+  left_join(biotypes, by = c("GENEID" = "ensembl_gene_id"))
+```
+
+```{r}
+write_delim(deg_annot, "results_keep_baseMean/GDE_DIFF_RESULTS-lengthScaledTPM_logFC_1_GB_vs_Control_NREADS-10_FC-1_annotated.tsv", delim = "\t")
+
+write_delim(biotypes_gtf, "biotypes_gtf_Refseq.tsv", delim = "\t")
+```
+
+
+
+```{r}
+long_counts_deg <- long_counts %>% filter(GENEID %in% deg$GENEID)
+```
+
+
+```{r}
+summary_grouped_deg <- long_counts_deg %>%
+  group_by(group, gene_biotype) %>%
+  summarise(total_count = sum(count, na.rm = TRUE), .groups = "drop")
+
+q3_per_group <- summary_grouped_deg %>%
+  group_by(group) %>%
+  summarise(Q3 = quantile(total_count, 0.75), .groups = "drop")
+
+top_quartile_biotypes_deg <- summary_grouped_deg %>%
+  left_join(q3_per_group, by = "group") %>%
+  filter(total_count >= Q3)
+```
+
+```{r}
+ggplot(top_quartile_biotypes_deg, aes(x = gene_biotype, y = total_count, fill = group)) +
+  geom_col(position = "dodge") +
+  labs(title = "Top gene biotypes",
+       x = "Gene biotype",
+       y = "Sum counts") +
+  theme_minimal() +
+  scale_fill_manual(values = c("GB" = "mediumpurple", "Control" = "orange")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+summary_grouped_deg %>% filter(gene_biotype == "rRNA")
+```
+
+```{r}
+long_counts_deg %>% filter(gene_biotype == "rRNA")
+```

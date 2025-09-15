@@ -1,0 +1,125 @@
+---
+title: "Deconvolution_gencode"
+author: "María Carazo"
+date: "2025-08-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(dplyr)
+```
+
+
+## DECONVOLUTION
+Import DE results
+```{r}
+gde_file <- "gencode/GBvsCV/GDE_RESULTS-lengthScaledTPM_logFC_1_GB_vs_CV.tsv"
+gde_results <- read_delim(
+  gde_file,
+  delim = "\t",
+  escape_double = FALSE,
+  trim_ws = TRUE, 
+  show_col_types = FALSE
+) 
+```
+
+Choose sheet depending on level to be analyzed
+```{r}
+EXCEL_file <- "references/Ruiz-Moreno_et-al_2022.xlsx"
+annotation <- readxl::read_xlsx(EXCEL_file, sheet = "level4")  
+```
+
+```{r}
+gde_annot <- gde_results %>%
+  left_join(annotation, by = c("GENENAME" = "gene"))
+```
+
+Salta warning de que hay duplicados. Compruebo a que pertenece. 
+```{r}
+dup_summary <- gde_annot %>%
+  group_by(GENENAME, cluster) %>%
+  summarise(n = n(),
+            log2FC_vals = paste(round(log2FoldChange, 3), collapse = ", "),
+            .groups = "drop") %>%
+  filter(n > 1)
+
+head(dup_summary, 20)
+```
+
+Son Metazoa_SRP	+ Y_RNA. Compruebo si pertenecen a algún cluster aunque sospecho que no
+```{r}
+any(dup_summary$GENENAME %in% annotation$gene)
+```
+
+No hay ninguno, asi que puedo retirarlos
+
+```{r}
+gde_annot_cluster <- gde_annot %>%
+  anti_join(dup_summary, by = c("GENENAME", "cluster")) %>% drop_na(cluster)
+```
+
+```{r}
+totals <- annotation %>%
+  drop_na(cluster) %>%
+  group_by(cluster) %>%
+  summarise(total_genes = n_distinct(gene), .groups = "drop")
+
+# Genes que quedaron en gde_annot_cluster
+remaining <- gde_annot_cluster %>%
+  group_by(cluster) %>%
+  summarise(remaining_genes = n_distinct(GENENAME), .groups = "drop")
+
+same_dir <- gde_annot_cluster %>%
+  group_by(cluster) %>%
+  summarise(same_direction = sum(sign(log2FoldChange) == sign(avg_log2FC), na.rm = TRUE),
+            .groups = "drop")
+
+# Combinar ambas tablas
+cluster_stats <- totals %>%
+  left_join(remaining, by = "cluster") %>%
+  mutate(remaining_genes = ifelse(is.na(remaining_genes), 0, remaining_genes)) %>%
+  left_join(same_dir, by = "cluster") %>%
+  mutate(same_direction = ifelse(is.na(same_direction), 0, same_direction))
+
+cluster_stats
+
+```
+
+```{r}
+# Preparar datos normalizados
+pie_data <- cluster_stats %>%
+  rowwise() %>%
+  mutate(
+    remaining_not_same = remaining_genes - same_direction,
+    missing_genes = total_genes - remaining_genes,
+    same_direction_pct = same_direction / total_genes,
+    remaining_not_same_pct = remaining_not_same / total_genes,
+    missing_genes_pct = missing_genes / total_genes
+  ) %>%
+  dplyr::select(cluster, same_direction_pct, remaining_not_same_pct, missing_genes_pct) %>%
+  pivot_longer(cols = c(same_direction_pct, remaining_not_same_pct, missing_genes_pct),
+               names_to = "category", values_to = "pct") %>%
+  filter(pct > 0)
+
+# Colores
+pie_colors <- c(
+  "same_direction_pct" = "blue",
+  "remaining_not_same_pct" = "skyblue",
+  "missing_genes_pct" = "grey90"
+)
+
+# Pie charts normalizados
+ggplot(pie_data, aes(x = "", y = pct, fill = category)) +
+  geom_bar(stat = "identity", color = "black") +
+  coord_polar(theta = "y") +
+  facet_wrap(~cluster) +
+  scale_fill_manual(values = pie_colors,
+                    labels = c("Missing genes","Remaining (diff dir)", "Same direction")) +
+  #labs(title = "Gene coverage per cluster",
+  #     fill = "") +
+  theme_void() +
+  theme(legend.position = "bottom")
+```
+
+

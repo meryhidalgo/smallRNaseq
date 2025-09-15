@@ -1,0 +1,200 @@
+---
+title: "clusterProfiler"
+author: "María Carazo"
+date: "2025-02-19"
+output: html_document
+---
+
+# Análisis funcional de enriquicimiento
+
+```{r, echo=FALSE}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(dplyr)
+library(enrichplot)
+library(readr)
+library(ggplot2)
+```
+
+```{r}
+list_diff <- read_delim("GDE_DIFF_RESULTS-lengthScaledTPM_logFC_1_GB_vs_DC_FC-1.tsv", delim='\t', show_col_types = FALSE)
+list_diffGenes <- list_diff$GENENAME
+#Elimino duplicados si los hay
+list_diffGenes <- unique(list_diffGenes)
+```
+
+
+## Clusterprofiler
+#### BIOLOGICAL PROCESS
+```{r}
+egoBP<- enrichGO(gene = list_diffGenes,
+  OrgDb = org.Hs.eg.db,
+  keyType = "SYMBOL", 
+  ont = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.05,
+  readable = FALSE)
+head(egoBP, 5) #solo muestra top 5
+head(egoBP, 15) %>% dplyr::select(Description, GeneRatio, FoldEnrichment, p.adjust)
+```
+
+Si quieres guardar los resultados. Cambia el nombre a tu gusto, añade un path si es necesario. 
+```{r}
+write.table(egoBP@result, "GBvsDC/GO/gencode-DiFFGenes-FC-1_egoBP_clusterprofiler.txt", sep="\t", quote=F)
+```
+
+#### CELLULAR COMPONENT
+```{r}
+egoCC<- enrichGO(gene = list_diffGenes,
+  OrgDb = org.Hs.eg.db,
+  keyType = "SYMBOL", 
+  ont = "CC",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.05,
+  readable = FALSE)
+head(egoCC, 5) #solo muestra top 5
+head(egoCC, 15) %>% dplyr::select(Description, GeneRatio, FoldEnrichment, p.adjust)
+```
+
+Si quieres guardar los resultados. Cambia el nombre a tu gusto. 
+```{r}
+write.table(egoCC@result, "GBvsDC/GO/gencode-DiFFGenes-FC-1_egoCC_clusterprofiler.txt", sep="\t", quote=F)
+```
+
+#### MOLECULAR FUNCTION
+```{r}
+egoMF<- enrichGO(gene = list_diffGenes,
+  OrgDb = org.Hs.eg.db,
+  keyType = "SYMBOL", 
+  ont = "MF",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.05,
+  readable = FALSE)
+head(egoMF, 5) #solo muestra top 5
+head(egoMF, 15) %>% dplyr::select(Description, GeneRatio, FoldEnrichment, p.adjust)
+```
+
+Si quieres guardar los resultados. Cambia el nombre a tu gusto. 
+```{r}
+write.table(egoMF@result, "GBvsDC/GO/gencode-DiFFGenes-FC-1_egoMF_clusterprofiler.txt", sep="\t", quote=F)
+```
+
+
+##### Visualización
+
+Cambia ego por egoBP, egoCC o egoMF si quieres centrarte en una ontología en concreto. 
+```{r, fig.width=10, fig.height=10}
+png("GBvsDC/GO/gencode-DiFFGenes-FC-1_egoBP_barplot.png", width=2000, height=2000, res=300)
+barplot(egoBP, showCategory=15)
+dev.off()
+
+barplot(egoBP, showCategory=15)
+```
+
+```{r}
+png("GBvsDC/GO/gencode-DiFFGenes-FC-1_egoBP_dotplot.png", width=2000, height=2000, res=300)
+dotplot(egoBP, showCategory=15)
+dev.off()
+dotplot(egoBP, showCategory=15)
+```
+
+```{r, fig.width=10}
+heatplot(egoBP, showCategory = 20) +
+  theme(axis.text.x = element_text(size = 2)) 
+```
+
+```{r}
+png("GBvsDC/GO/gencode-DiFFGenes-FC-1_egoBP_upsetplot.png", width=2000, height=1500, res=300)
+upsetplot(egoBP)
+dev.off()
+upsetplot(egoBP)
+```
+
+##treeplot
+```{r}
+ego_pairwise <- pairwise_termsim(egoBP)
+png("GBvsDC/GO/gencode-DiFFGenes-FC-1_egoBP_treeplot.png", width=3000, height=1500, res=300)
+treeplot(ego_pairwise, showCategory=15)
+dev.off()
+treeplot(ego_pairwise, showCategory=15)
+```
+
+
+# Working separately with upexpressed and downexpressed genes
+## UP
+```{r}
+list_diff_up <- list_diff %>% filter(log2FoldChange > 1)
+
+list_diffGenes_up <- list_diff_up$GENENAME
+#Elimino duplicados si los hay
+list_diffGenes_up <- unique(list_diffGenes_up)
+```
+
+
+#### BIOLOGICAL PROCESS
+```{r}
+egoBP<- enrichGO(gene = list_diffGenes_up,
+  OrgDb = org.Hs.eg.db,
+  keyType = "SYMBOL", 
+  ont = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.05,
+  readable = FALSE)
+head(egoBP, 5) #solo muestra top 5
+head(egoBP, 15) %>% dplyr::select(Description, GeneRatio, FoldEnrichment, p.adjust)
+```
+
+```{r}
+write.table(egoBP@result, "GBvsDC/GO/UPgencode-DiFFGenes-FC-1_egoBP_clusterprofiler.txt", sep="\t", quote=F)
+```
+
+##treeplot
+```{r}
+ego_pairwise <- pairwise_termsim(egoBP)
+png("GBvsCV/GO/UPgencode-DiFFGenes-FC-1_egoBP_treeplot.png", width=3000, height=1500, res=300)
+treeplot(ego_pairwise, showCategory=15)
+dev.off()
+treeplot(ego_pairwise, showCategory=15)
+```
+
+
+## DOWN
+```{r}
+list_diff_down <- list_diff %>% filter(log2FoldChange < -1)
+
+list_diffGenes_down <- list_diff_down$GENENAME
+#Elimino duplicados si los hay
+list_diffGenes_down <- unique(list_diffGenes_down)
+```
+
+#### BIOLOGICAL PROCESS
+```{r}
+egoBP<- enrichGO(gene = list_diffGenes_down,
+  OrgDb = org.Hs.eg.db,
+  keyType = "SYMBOL", 
+  ont = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.05,
+  readable = FALSE)
+head(egoBP, 5) #solo muestra top 5
+head(egoBP, 15) %>% dplyr::select(Description, GeneRatio, FoldEnrichment, p.adjust)
+```
+
+```{r}
+write.table(egoBP@result, "GBvsDC/GO/DOWNgencode-DiFFGenes-FC-1_egoBP_clusterprofiler.txt", sep="\t", quote=F)
+```
+
+
+##treeplot
+```{r}
+ego_pairwise <- pairwise_termsim(egoBP)
+png("GBvsDC/GO/DOWNgencode-DiFFGenes-FC-1_egoBP_treeplot.png", width=3000, height=1500, res=300)
+treeplot(ego_pairwise, showCategory=15)
+dev.off()
+treeplot(ego_pairwise, showCategory=15)
+```

@@ -1,0 +1,126 @@
+---
+title: "Forest Plot"
+author: "María Carazo"
+date: "2025-09-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggh4x)
+library(ggplot2)
+```
+
+```{r}
+dir_path <- "survival/"
+files <- list.files(dir_path, pattern = "^Diff_.*_survival_data_.*\\.tsv$", full.names = TRUE)
+```
+
+```{r}
+all_data <- map_dfr(files, ~ read_tsv(.x, show_col_types = FALSE) %>% mutate(filename = basename(.x))) # map_dfr hace un bind_rows automáticamente
+```
+
+```{r}
+plot_data <- all_data %>%
+  filter(Cox_pvalue < 0.05) %>% arrange(HazardRatio) %>%
+  mutate(
+    gene_biotype = case_when(
+      str_detect(filename, "GtRNAdb") ~ "tRNA",
+      str_detect(filename, "lncRNA") ~ "lncRNA",
+      str_detect(filename, "miRNA") ~ "miRNA",
+      str_detect(filename, "snoRNA") ~ "snoRNA",
+      TRUE ~ "Other"
+    ))  %>%
+    mutate(
+        GENENAME = if_else(gene_biotype == "tRNA", gsub("^Homo_sapiens_", "", Gene), GENENAME),
+        label = coalesce(GENENAME, Gene))
+```
+
+
+```{r, fig.height=6, fig.width=8}
+forest_plot <- ggplot(plot_data, aes(x = HazardRatio, y = label, xmin = CI_lower, xmax = CI_upper, color = gene_biotype)) +
+  geom_point(size = 3) +
+  geom_errorbarh(height = 0.2) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "gray50") +
+  scale_x_log10() +
+  labs(
+    x = "Hazard Ratio (log scale)",
+    y = "",
+    title = "Forest Plot: Significant Genes (Cox p < 0.05)",
+    color = "Gene biotype"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(face = "bold")
+  )
+
+forest_plot
+ggsave(filename = file.path("../../survival/after_rRNA/Forest_plot_pCox_0-05_AdjustedSexAge.pdf"),
+       device = "pdf",
+       plot = forest_plot, width = 320, height = 240,  units = "mm")
+```
+
+Quiero conocer el log2FC de cada gen en GB vs CV y añadirlo al gráfico
+```{r}
+# Archivos de DE para cada biotipo
+files <- c(
+  "../../DGE/scripts/txi_object/lncRNA/GBvsCV/GDE_DIFF_RESULTS-lengthScaledTPM_logFC_1_GB_vs_CV_FC-1.tsv",
+  "../../DGE/scripts/txi_object/GtRNAdb/GBvsCV/GDE_DIFF_RESULTS-lengthScaledTPM_logFC_1_GB_vs_CV_FC-1.tsv",
+  "../../DGE/scripts/txi_object/mature_miRNA/GBvsCV/GDE_DIFF_RESULTS-lengthScaledTPM_logFC_1_GB_vs_CV_FC-1.tsv",
+  "../../DGE/scripts/txi_object/snoRNA/GBvsCV/GDE_DIFF_RESULTS-lengthScaledTPM_logFC_1_GB_vs_CV_FC-1.tsv"
+)
+
+deg_diff_all <- map_dfr(files, read_delim, delim = "\t", escape_double = FALSE, trim_ws = TRUE, show_col_types = FALSE)
+```
+
+```{r}
+plot_data <- plot_data %>%
+  mutate(
+    Gene_for_merge = if_else(gene_biotype %in% c("tRNA", "miRNA"),
+                             gsub("\\.", "-", label),
+                             Gene)
+  )
+deg_subset <- deg_diff_all %>%
+  filter(GENEID %in% plot_data$Gene_for_merge) %>%
+  dplyr::select(GENEID, GENENAME, log2FoldChange)
+```
+
+
+```{r}
+plot_data <- plot_data %>%
+  left_join(deg_subset, by = c("Gene_for_merge" = "GENEID"))
+```
+
+
+```{r}
+ggplot(plot_data, aes(x = HazardRatio, y = label, xmin = CI_lower, xmax = CI_upper, color = log2FoldChange)) +
+  geom_point(size = 3) +
+  geom_errorbarh(height = 0.2) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "gray50") +
+  scale_x_log10() +
+  scale_color_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  labs(
+    x = "Hazard Ratio (log scale)",
+    y = "",
+    color = "log2FC GB vs CV",
+    title = "Forest Plot: Significant Genes (Cox p < 0.05)"
+  ) +
+  ggh4x::facet_grid2(gene_biotype ~ ., scales = "free_y", space = "free") +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.y = element_text(size = 10),
+    strip.text = element_text(face = "bold"),
+    plot.title = element_text(face = "bold")
+  )
+
+```
+
+```{r}
+plot_data
+```
+

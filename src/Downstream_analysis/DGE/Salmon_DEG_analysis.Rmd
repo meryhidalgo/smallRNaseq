@@ -1,0 +1,270 @@
+---
+title: "Differential Gene Expression Analysis"
+author: "María Carazo"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(DESeq2)
+library(ggplot2)
+library(dplyr)
+library(rtracklayer)
+library(tidyr)
+library(readr)
+library(ggrepel)
+library(textshape)
+library(tibble)
+library(stringr)
+library(glue)
+```
+
+## Input files
+```{r input}
+design_tab <- "design.tab" #should be a file with two columns: SampleName and GroupName. in our case GroupName is either GB or CV
+
+#comment and decomment the rds_object to select the one to analyze
+rds_object <- "sRNA_rRNA_EMN_45S_txi_object-lengthScaledTPM.rds"
+rds_object <- "sRNA_hairpin_miRNA_txi_object-lengthScaledTPM.rds"
+rds_object <- "sRNA_mature_miRNA_txi_object-lengthScaledTPM.rds"
+rds_object <- "sRNA_snoRNA_txi_object-lengthScaledTPM.rds"
+rds_object <- "sRNA_lncRNA_txi_object-lengthScaledTPM.rds"
+rds_object <- "sRNA_GtRNAdb_txi_object-lengthScaledTPM.rds"
+
+nreads <- 10
+#change the outdir depending on the rds_object selected
+outdir <- "hairpin_miRNA/"
+```
+
+
+# Processing of data
+```{r process}
+# Prepare design
+design <- read_delim(
+  design_tab,
+  delim = "\t",
+  escape_double = FALSE,
+  trim_ws = TRUE, 
+  show_col_types = FALSE
+) 
+unique(design$GroupName)
+
+selected_design <- design
+selected_design$GroupName <- factor(selected_design$GroupName, levels = c("CV","GB"))
+samples <- selected_design$SampleName
+
+# Load counts data
+txi.inf <- readRDS(rds_object)
+
+```
+
+## Set Up Differential Gene Expression (DGE) Analysis
+This chunk make take a bit longer to process. 
+```{r}
+# Create DESeq object
+model <- as.formula("~GroupName")
+deseq_object <- DESeqDataSetFromTximport(
+  txi = txi.inf,
+  colData = selected_design,
+  design = model
+)
+# Filter counts by minimum number of reads
+keep <- rowSums(counts(deseq_object) > 0) >= 10
+deseq_object_filtered <- deseq_object[keep,]
+
+dds <- DESeq(deseq_object_filtered)
+```
+
+## Design contrast
+```{r}
+contrast <- resultsNames(dds)[2]
+print(contrast)
+```
+
+
+## Perform PCA (PC1 vs PC2)
+If annotation is short, number of analyzed features does not allow vst method and varianceStabilizingTransformation should be used instead. 
+```{r, fig.height = 5, fig.width = 8}
+vsd <- vst(dds, blind=FALSE)
+#vsd <- varianceStabilizingTransformation(dds, blind=FALSE)
+pcaData <- plotPCA(vsd, intgroup=c("GroupName"), pcsToUse=1:2, returnData=TRUE)
+
+PCA <- ggplot(pcaData, aes(x=PC1, y=PC2, color=GroupName, label=name)) +
+  geom_point(size=3, alpha=0.5) +
+  labs(x=paste0("PC1: ", round(100 * attr(pcaData, "percentVar")[1], 1), "% variance"),
+       y=paste0("PC2: ", round(100 * attr(pcaData, "percentVar")[2], 1), "% variance")) +
+  ggtitle("PC1 vs PC2 sRNA samples") +
+  scale_color_manual(values = c("GB" = "mediumorchid", "CV" = "orange")) +
+  #geom_text_repel(data = pcaData, aes(label = name),
+  #                 size = 3.5, alpha = 0.8, max.overlaps = 15) +
+  theme_minimal() 
+
+PCA
+
+ggsave(filename = file.path(glue(outdir, str_interp("PCA-${contrast}.pdf"))),
+       device = "pdf",
+       plot = PCA, width = 400, height = 250,  units = "mm")
+
+
+```
+
+Add centroids and ellipses to PCA plot
+```{r, fig.height = 5, fig.width = 8}
+centroids <- pcaData %>%
+  group_by(GroupName) %>%
+  summarise(PC1 = mean(PC1), PC2 = mean(PC2))
+
+#label_mapping <- c("highgrade_GB" = "HGG", "lowgrade_GB" = "LGG")
+
+PCA <- ggplot(pcaData, aes(x=PC1, y=PC2, color=GroupName)) +
+  stat_ellipse(aes(group = GroupName, color = GroupName, fill = GroupName), 
+               level = 0.95, geom = "polygon", alpha = 0.2, show.legend = FALSE) +  
+  geom_point(size=4, alpha=0.6) +  # Points with transparency
+  geom_point(data=centroids, aes(x=PC1, y=PC2), size = 3, alpha = 1, shape=6, color=c("orange", "mediumorchid")) +  # Centroids (black and NO legend)
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") + # Line at y = 0
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey") + # Line at x = 0
+  labs(x=paste0("PC1: ", round(100 * attr(pcaData, "percentVar")[1], 1), "% variance"),
+       y=paste0("PC2: ", round(100 * attr(pcaData, "percentVar")[2], 1), "% variance")) +
+  scale_color_manual(values = c("GB" = "mediumorchid", "CV" = "orange")) +
+  scale_fill_manual(values = c("GB" = "mediumorchid", "CV" = "orange")) +
+  theme_minimal() 
+
+PCA
+
+ggsave(filename = file.path(glue(outdir, str_interp("PCA-${contrast}_centroids.pdf"))),
+       device = "pdf",
+       plot = PCA, width = 250, height = 250,  units = "mm")
+```
+
+```{r}
+# Select groups for comparison
+group_a <- "CV"
+group_b <- "GB"
+
+# Specify minimum log2FC for the regulated genes
+fold_change <- 1
+
+# Specify minimum p-value for the regulated genes
+p_value <- 0.05
+
+```
+
+```{r}
+objectLFC <- lfcShrink(dds, 
+                       coef=contrast, 
+                       type="apeglm")
+```
+
+
+```{r}
+gde_results <- objectLFC %>%
+  as.data.frame(.) %>% 
+  rownames_to_column("GENEID") %>%
+  dplyr::mutate(
+    Significant = ifelse(
+      padj <= p_value, "Yes", "No"),
+    Regulated = ifelse(
+      log2FoldChange >= fold_change | 
+        log2FoldChange <= -fold_change, "Yes", "No"),
+    DiffRegulated = ifelse(
+      Significant == "Yes" & Regulated == "Yes", "Yes", "No")
+  )
+```
+
+```{r}
+sig_gde_results <- gde_results %>% dplyr::filter(Significant == "Yes")
+gde_regulated <- gde_results %>% dplyr::filter(DiffRegulated == "Yes")
+```
+
+```{r}
+dim(gde_regulated)
+dim(gde_regulated %>% dplyr::filter(log2FoldChange >= fold_change))
+dim(gde_regulated %>% dplyr::filter(log2FoldChange <= -fold_change))
+```
+
+
+# Volcano plot
+
+```{r}
+de <- gde_results
+min_fc <- round(min(gde_results$log2FoldChange) - .75)
+max_fc <- round(max(gde_results$log2FoldChange) + .75)
+max_pvalue <- max(-log10(gde_results$pvalue)[is.finite(-log10(gde_results$pvalue))])
+
+de$diffexpressed <- "NO"
+de$diffexpressed[de$log2FoldChange > fold_change & de$padj < p_value] <- "UP"
+de$diffexpressed[de$log2FoldChange < -fold_change & de$padj < p_value] <- "DOWN"
+
+volcano_plot <- ggplot(data=de, aes(x=log2FoldChange, 
+                                    y=-log10(pvalue), col=diffexpressed)) +
+  geom_point(alpha=0.5, size=3) + 
+  theme_minimal() +
+  scale_color_manual(values=c("red", "darkgrey", "blue")) +
+  geom_vline(xintercept=c(-fold_change, fold_change), col="lightgrey") +
+  geom_hline(yintercept=-log10(p_value), col="lightgrey") +
+  ylim(c(0, max_pvalue)) +
+  xlim(c(min_fc, max_fc)) +
+  theme(legend.position="top") +
+  theme(
+    panel.background = element_rect(fill = NA),
+    panel.grid.major = element_line(colour = "grey", linewidth = 0.1),
+    panel.ontop = TRUE,
+    plot.title = element_text(size = 15),
+    axis.text = element_text(size = 15),
+    axis.title = element_text(size = 15),
+    axis.ticks.length = unit(0.3, "cm"),
+    strip.background = element_rect(colour = "white", fill = "white"),
+    strip.text.x = element_text(size = 15, face = "bold"),
+    panel.spacing = unit(1.25, "lines"),
+    legend.text = element_text(size=14),
+    legend.title = element_text(size=14),
+  )
+
+volcano_plot
+```
+```{r}
+contrast_dir <- contrast %>% str_replace("GroupName_", glue("lengthScaledTPM_logFC_{fold_change}_"))
+print(contrast_dir)
+```
+
+
+```{r}
+ggsave(filename = file.path(glue(outdir, str_interp("VOLCANO_PLOT_FC-${contrast_dir}-${fold_change}.pdf"))),
+       device = "pdf",
+       plot = volcano_plot, width = 250, height = 250,  units = "mm")
+
+# Save data
+#write_delim(
+#  normalised_counts, 
+#  file.path(glue(outdir,str_interp("NORM_COUNTS-${contrast_dir}.tsv"))),
+#  delim = "\t"
+#)
+
+write_delim(
+  gde_results, 
+  file.path(
+    glue(outdir,str_interp("GDE_RESULTS-${contrast_dir}.tsv"))),
+  delim = "\t"
+)
+
+write_delim(
+  sig_gde_results, 
+  file.path(
+    glue(outdir,str_interp("GDE_SIG_RESULTS-${contrast_dir}.tsv"))),
+  delim = "\t"
+)
+
+write_delim(
+  gde_regulated, 
+  file.path(
+    glue(outdir,str_interp("GDE_DIFF_RESULTS-${contrast_dir}_FC-${fold_change}.tsv"))),
+  delim = "\t"
+)
+
+write_delim(
+  selected_design, 
+  file.path(
+    glue(outdir,str_interp("DESIGN-${contrast_dir}.tsv"))),
+  delim = "\t"
+)
+```
+

@@ -1,0 +1,107 @@
+---
+title: "Gene_biotypes"
+author: "María Carazo"
+date: "2025-06-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(biomaRt)
+library(textshape)
+```
+
+```{r}
+diff_path <- "GBvsCV/GDE_DIFF_RESULTS-lengthScaledTPM_logFC_1_GB_vs_CV_FC-1.tsv"
+
+deg <- read_delim(
+  diff_path, 
+  delim = "\t", 
+  escape_double = FALSE,
+  trim_ws = TRUE,
+  locale = locale(decimal_mark = ".")
+) #%>% dplyr::select(GENEID)
+
+deg$GENEID <- sub("\\..*", "", deg$GENEID)
+```
+
+
+
+Extraer `gene_biotype` desde biomart
+```{r}
+ensembl <- useEnsembl(biomart = "genes", dataset = "hsapiens_gene_ensembl")  # humano; cambia a mouse si necesitas
+
+gene_id <- deg$GENEID
+#gene_id_clean <- sub("\\.\\d+$", "", gene_id)
+
+biotypes <- getBM(
+  attributes = c("ensembl_gene_id", "gene_biotype"),
+  filters = "ensembl_gene_id",
+  values = gene_id,
+  mart = ensembl
+)
+```
+
+
+
+```{r}
+deg_annot <- deg %>%
+  left_join(biotypes, by = c("GENEID" = "ensembl_gene_id"))
+
+deg_annot_pos <- deg_annot %>% filter(log2FoldChange > 1)
+deg_annot_neg <- deg_annot %>% filter(log2FoldChange < -1)
+```
+
+
+
+```{r}
+all_biotypes <- unique(deg_annot$gene_biotype)
+needed <- length(all_biotypes)
+
+library(RColorBrewer)
+combined_palette <- c(brewer.pal(12, "Set3"),
+                      brewer.pal(8, "Dark2"),
+                      brewer.pal(8, "Paired"))[1:needed]
+
+biotype_colors <- setNames(combined_palette, all_biotypes)
+
+```
+
+```{r}
+pie_chart_data <- deg_annot_pos %>%
+  group_by(gene_biotype) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  arrange(desc(count))
+
+ggplot(pie_chart_data, aes(x = "", y = count, fill = gene_biotype)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "Distribution of Gene Biotypes in log2FC > 1 DEGs") +
+  theme_void() +
+  scale_fill_manual(values = biotype_colors) +
+  theme(legend.position = "right")
+```
+
+```{r}
+pie_chart_data <- deg_annot_neg %>%
+  group_by(gene_biotype) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  arrange(desc(count))
+
+ggplot(pie_chart_data, aes(x = "", y = count, fill = gene_biotype)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "Distribution of Gene Biotypes in log2FC < -1 DEGs") +
+  theme_void() +
+  scale_fill_manual(values = biotype_colors) +
+  theme(legend.position = "right")
+```
+

@@ -1,0 +1,179 @@
+---
+title: "Differential Gene Expression Analysis"
+author: "María Carazo"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(DESeq2)
+library(ggplot2)
+library(dplyr)
+library(rtracklayer)
+library(tidyr)
+library(readr)
+library(ggrepel)
+library(textshape)
+library(tibble)
+library(stringr)
+library(glue)
+```
+
+## Input files
+```{r input}
+#both dereg are applied with log2FC > 1
+dereg_miRNA <- read_delim("mature_miRNA/GDE_DIFF_RESULTS-lengthScaledTPM_logFC_1_GB_vs_Control_FC-1.tab", delim = "\t") 
+dereg_genes <- read_delim("gencode/GDE_DIFF_RESULTS-lengthScaledTPM_logFC_1_GB_vs_CV_FC-1.tsv", delim = "\t") 
+
+#predictions table taken from https://mirdb.org/download/miRDB_v6.0_prediction_result.txt.gz 
+predictions <- read.table("miRDB_hsa_v6.0_prediction_result.txt", header = FALSE, sep = "\t", stringsAsFactors = FALSE)
+```
+
+
+```{r}
+mir_list <- dereg_miRNA %>% pull(GENEID)
+colnames(predictions1) <- c("miR", "gene", "score")
+
+predictions <- predictions1 %>% filter (miR %in% mir_list) %>% filter(score >= 80)   # Filtrar por score mínimo
+
+# Extraer columnas específicas
+targets <- predictions$gene
+scores  <- predictions$score
+```
+
+
+```{r}
+library(biomaRt)
+ensembl <- useEnsembl(biomart="ensembl", dataset="hsapiens_gene_ensembl")
+
+# IDs de transcriptos que quieres convertir
+transcripts <- predictions$gene
+
+# Obtener el genename
+gene_map <- getBM(
+  attributes = c("refseq_mrna", "hgnc_symbol"),
+  filters = "refseq_mrna",
+  values = transcripts,
+  mart = ensembl
+)
+
+gene_map_unique <- gene_map %>%
+  distinct(refseq_mrna, .keep_all = TRUE)   # un REFSEQ → un SYMBOL
+
+predictions_gene <- predictions %>%
+  left_join(gene_map_unique, by = c("gene" = "refseq_mrna")) 
+
+# Ahora predictions_gene tiene: miR, gene (NM_), score, hgnc_symbol
+head(predictions_gene)
+
+```
+
+```{r}
+target_genes <- unique(predictions_gene$hgnc_symbol)
+```
+
+
+
+```{r}
+dereg_targets <- predictions_gene %>%
+  inner_join(dereg_genes, by = c("hgnc_symbol" = "GENENAME"))
+
+length(unique(dereg_targets$hgnc_symbol))
+
+dereg_targets_unique <- dereg_targets %>%
+  arrange(desc(score)) %>%
+  distinct(miR, hgnc_symbol, log2FoldChange, .keep_all = TRUE)
+
+length(unique(dereg_targets_unique$hgnc_symbol))
+```
+
+
+## NETWORK INTERACTION GRAPH
+```{r}
+library(igraph)
+library(ggraph)
+
+edges <- dereg_targets_unique %>%
+  dplyr::select(miR, hgnc_symbol)
+
+nodes <- tibble(name = unique(c(edges$miR, edges$hgnc_symbol))) %>%
+  # log2FC de genes
+  left_join(
+    dereg_targets_unique %>%
+      dplyr::select(hgnc_symbol, log2FoldChange) %>%
+      distinct(hgnc_symbol, .keep_all = TRUE),
+    by = c("name" = "hgnc_symbol")
+  ) %>%
+  # log2FC de miRNA
+  left_join(
+    gde_regulated %>%
+      dplyr::select(GENEID, log2FoldChange) %>%
+      distinct(GENEID, .keep_all = TRUE),
+    by = c("name" = "GENEID")
+  ) %>%
+  rename(
+    log2FoldChange_gene = log2FoldChange.x,
+    log2FoldChange_miRNA = log2FoldChange.y
+  ) %>%
+  mutate(
+    shape = ifelse(name %in% edges$miR, "miRNA", "Gene"),
+    color = case_when(
+      shape == "miRNA" & !is.na(log2FoldChange_miRNA) & log2FoldChange_miRNA > 0 ~ "Up",
+      shape == "miRNA" & !is.na(log2FoldChange_miRNA) & log2FoldChange_miRNA < 0 ~ "Down",
+      shape == "Gene" & !is.na(log2FoldChange_gene) & log2FoldChange_gene > 0 ~ "Up",
+      shape == "Gene" & !is.na(log2FoldChange_gene) & log2FoldChange_gene < 0 ~ "Down",
+      TRUE ~ "NA"
+    )
+  )
+
+#filtrar SOLO interacciones opuestas
+edges_annot <- edges %>%
+  left_join(nodes %>% dplyr::select(name, log2FoldChange_miRNA), by = c("miR" = "name")) %>%
+  left_join(nodes %>% dplyr::select(name, log2FoldChange_gene), by = c("hgnc_symbol" = "name")) %>%
+  filter(
+    (!is.na(log2FoldChange_miRNA) & !is.na(log2FoldChange_gene)) &
+      ((log2FoldChange_miRNA > 0 & log2FoldChange_gene < 0) |
+       (log2FoldChange_miRNA < 0 & log2FoldChange_gene > 0))
+  )
+
+g <- graph_from_data_frame(d = edges_annot, vertices = nodes, directed = FALSE)
+g <- delete_vertices(g, degree(g) == 0)  # <--- elimina nodos sin edges/CONEXIONES
+
+
+ggraph(g, layout = "fr") +
+  geom_edge_link(alpha = 0.4, color = "grey70") +
+  geom_node_point(aes(shape = shape, color = color), size = 4) +
+  geom_node_text(
+    aes(
+      label = name,
+      fontface = ifelse(shape == "miRNA", "bold", "plain")  # negrita solo en miRNA
+    ),
+    repel = TRUE,
+    size = 3
+  ) +
+  scale_shape_manual(values = c("miRNA" = 17, "Gene" = 16)) + # triángulo = miRNA, círculo = gene
+  scale_color_manual(values = c("Up" = "steelblue", "Down" = "tomato")) +
+  labs(color = "Regulation", shape = "Node type") +
+  theme_void()
+
+```
+
+
+```{r}
+mir_counts <- dereg_targets_unique %>%
+  count(miR, name = "n_interactions") %>%
+  arrange(desc(n_interactions))
+
+# Mostrar el top
+head(mir_counts, 10)
+
+# El miR con más interacciones
+top_mir <- mir_counts %>% slice(1)
+top_mir
+```
+
+```{r}
+dereg_targets_unique %>%
+  filter(miR == top_mir$miR)
+```
+
+

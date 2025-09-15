@@ -1,0 +1,141 @@
+---
+title: "survival_data"
+author: "María Carazo"
+date: "2025-03-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(survival)
+library(survminer)
+library(dplyr)
+library(readxl)
+library(readr)
+library(biomaRt)
+```
+
+## Input data
+
+```{r input}
+design <- read.csv('design.tab', sep="\t")
+#Assuming OS is the time variable and Censor..alive.0..dead.1. represents the event status:
+clinical_GB <- read_excel("../../1.Clinical data cfRNA-smallRNAseq.xlsx", sheet = 2, col_names = TRUE) 
+colnames(clinical_GB) <- as.character(unlist(clinical_GB[1, ]))
+clinical_GB <- clinical_GB[-1, ]
+clinical_GB <- clinical_GB %>% mutate(`Código BD-LoreaBlazquez` = gsub("-", "_", `Código BD-LoreaBlazquez`))
+```
+
+In this script it is done for lncRNA, but other biotypes should also be explored and saved in survival directory. 
+```{r}
+expression_data <- read.csv("../../DGE/tables/txi/sRNA_lncRNA_GBvsCV_COUNTS_AGGREGATED-lengthScaledTPM.tab", sep = '\t')
+deg_diff <- read_delim("../../DGE/scripts/txi_object/lncRNA/GBvsCV/GDE_DIFF_RESULTS-lengthScaledTPM_logFC_1_GB_vs_CV_FC-1.tsv", delim = "\t", escape_double = FALSE, trim_ws = TRUE, show_col_types = FALSE)
+```
+
+```{r}
+rownames(expression_data) <- make.names(expression_data$GENEID, unique = TRUE)
+expression_data <- expression_data %>% dplyr::select(!GENEID)
+expression_data_t <- t(expression_data) %>% as.data.frame()
+expression_data_t$SampleName <- rownames(expression_data_t)
+```
+
+Specific pre-processing for our clinical data, should be adapted to each dataset
+```{r}
+clinical_GB$`Fecha de fallecimiento si fallecido` <- as.Date(as.numeric(clinical_GB$`Fecha de fallecimiento si fallecido`), origin = "1899-12-30")
+clinical_GB$Fecha_RMM <- as.Date(as.numeric(clinical_GB$Fecha_RMM), origin = "1899-12-30")
+
+#Create Censor..alive.0..dead.1. column: 1 if dead, 0 if alive
+survival_data <- data.frame(clinical_GB[,1]) 
+colnames(survival_data)[colnames(survival_data) == "Código.BD.LoreaBlazquez"] <- "SampleName"
+survival_data$Censor..alive.0..dead.1. <- ifelse(is.na(clinical_GB$`Fecha de fallecimiento si fallecido`), 0, 1)
+survival_data$Sexo <- clinical_GB$Sexo
+survival_data$Edad <- round(as.numeric(clinical_GB$`Edad Dx`))
+
+#Create OS column with time info
+survival_data$OS <- ifelse(
+  !is.na(clinical_GB$`Supervivencia (días)`),
+  clinical_GB$`Supervivencia (días)`,
+  as.numeric(Sys.Date() - clinical_GB$Fecha_RMM)
+)
+
+```
+
+
+```{r formula}
+timecol <- "OS"
+statuscol <- "Censor..alive.0..dead.1."
+```
+
+
+```{r}
+genelist <- deg_diff %>% pull(GENEID)
+all_data <- merge(survival_data, expression_data_t, by = "SampleName")
+all_data <- all_data[, c("SampleName", "OS", "Censor..alive.0..dead.1.", "Edad", "Sexo", genelist)]
+all_data <- all_data %>% mutate(across(c(all_of(genelist), OS, Edad), ~ as.numeric(.)))
+all_data$Sexo <- factor(all_data$Sexo, levels = c("Mujer", "Hombre"))
+```
+
+```{r}
+kaplan_meier_hr_pvalue <- function(data, timecol, statuscol, genelist) {
+  results <- data.frame(
+    gene = character(),
+    km_pval = numeric(),
+    cox_hr = numeric(),
+    cox_pval = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  for (gene in genelist) {
+    gene <- as.character(gene)
+    
+    tryCatch({
+      # Calcular punto de corte
+      cut <- surv_cutpoint(data, time = timecol, event = statuscol, variables = gene)
+      categorized <- surv_categorize(cut)
+      categorized$Edad <- data$Edad
+      categorized$Sexo <- data$Sexo
+
+      formula <- as.formula(paste("Surv(", timecol, ",", statuscol, ") ~ ", gene, " + Edad + Sexo", sep = ""))
+      
+      # Kaplan-Meier
+      km_fit <- surv_fit(formula, data = categorized)
+      km_pval <- surv_pvalue(km_fit)$pval
+      
+      # Cox
+      cox_model <- coxph(formula, data = data)
+      cox_summary <- summary(cox_model)
+      # Extract Cox model p-value, HR, and confidence intervals
+      cox_pval <- cox_summary$coefficients[,"Pr(>|z|)"][[1]]
+      hr <- cox_summary$coefficients[,"exp(coef)"][[1]]
+      lower_ci <- cox_summary$conf.int[,"lower .95"][[1]]
+      upper_ci <- cox_summary$conf.int[,"upper .95"][[1]]
+      
+      results <- rbind(results, data.frame(
+        Gene = gene,
+        KM_pvalue = km_pval,
+        Cox_pvalue = cox_pval,
+        HazardRatio = hr,
+        CI_lower = lower_ci,
+        CI_upper = upper_ci
+      ))
+      
+    }, error = function(e) {
+      message(paste("Skipping", gene, ":", e$message))
+    })
+  }
+  
+  return(results)
+}
+
+```
+
+```{r}
+colnames(all_data) <- make.names(colnames(all_data))
+genelist <- make.names(genelist) 
+results <- kaplan_meier_hr_pvalue(all_data, timecol, statuscol, genelist)
+results
+```
+
+```{r}
+write.table(results, file = "survival/Diff_lncRNA_survival_data_AdjustedSexAge.tsv", row.names = FALSE, sep = '\t', quote = FALSE)
+```
