@@ -24,7 +24,7 @@ gde_results <- read_delim(
 ) 
 ```
 
-Choose sheet depending on level to be analyzed
+Choose sheet depending on level to be analyzed. XLSX file from Ruiz-Moreno et al 2022 (https://doi.org/10.1093/neuonc/noaf113) can be found in references folder. 
 ```{r}
 EXCEL_file <- "references/Ruiz-Moreno_et-al_2022.xlsx"
 annotation <- readxl::read_xlsx(EXCEL_file, sheet = "level4")  
