@@ -12,7 +12,7 @@ El pipeline está diseñado para ejecutarse parcialmente en clústeres HPC (High
 ├── design.tab                   # Tabla de diseño experimental
 ├── envs/                        # Entornos conda necesarios
 │   └── *.yml
-├── references/                  
+├── references/
 │   ├── EMN_45S_rRNA.gtf
 │   ├── EMN_45S_rRNA.fa / .fai
 │   ├── sRNA-adapters.fa
@@ -56,7 +56,7 @@ El pipeline está diseñado para ejecutarse parcialmente en clústeres HPC (High
 │       │   ├── Gene_biotype_gencode.Rmd
 │       │   └── plot_mappingRate_diff.ipynb
 │       ├── Figure_7/plot_depth.ipynb
-│       ├── Figure_12/miRNA_interaction_network.Rmd
+│       ├── Figure_12/miRNA_interaction_network.Rmd 
 │       ├── Figure_16/Deconvolution.Rmd
 │       └── Figure_17/
 │           ├── Forest_plot.Rmd
@@ -102,8 +102,8 @@ El pipeline está diseñado para ejecutarse parcialmente en clústeres HPC (High
 6. ### Análisis expresión diferencial
    - Script: `Downstream_analysis/DGE/Salmon_DEG_analysis.Rmd`, `Gene_biotype_DEG_gencode.Rmd`
    - Enriquecimiento funcional (GO): `Downstream_analysis/GO/GO_clusterprofiler.Rmd`
-   - Red de interacción miRNA-target: `Downstream_analysis/Figure_12/miRNA_interaction_network.Rmd`
-   - Estudio de deconvolución: `Downstream_analysis/Figure_16/Deconvolution.Rmd`
+   - Red de interacción miRNA-target: `Downstream_analysis/Figure_12/miRNA_interaction_network.Rmd`. Se apoya en la base de datos miRDB. 
+   - Estudio de deconvolución: `Downstream_analysis/Figure_16/Deconvolution.Rmd`. Necesita del archivo de anotaciones `reports/Ruiz-Moreno_et-al_2022.xlsx`
    - Análisis de supervivencia: `Downstream_analysis/Figure_17/survival_data.Rmd + Forest_plot.Rmd`
 
 ---
