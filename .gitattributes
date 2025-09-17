@@ -1,0 +1,10 @@
+# Ignorar reports HTML en el conteo de lenguajes
+reports/* linguist-vendored
+*.html linguist-vendored
+
+# Opcional: marcar scripts
+*.sh linguist-language=Shell
+*.Rmd linguist-language=R
+*.R linguist-language=R
+*.ipynb linguist-language=Python
+*.py linguist-language=Python
