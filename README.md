@@ -9,7 +9,6 @@ El pipeline está diseñado para ejecutarse parcialmente en clústeres HPC (High
 ## 📁 Estructura del repositorio
 ```text
 .
-├── design.tab                   # Tabla de diseño experimental
 ├── envs/                        # Entornos conda necesarios
 │   └── *.yml
 ├── references/
